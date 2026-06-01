@@ -1,0 +1,2385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIS fbas 的 TAS 设计 - 栞</title>
+    <style>
+        :root {
+            --font-ui: "Bahnschrift", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+            --font-code: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+            --bg-image: url("【哲风壁纸】eva-凌波丽2.png");
+            --bg-clarity: 78;
+            --bg-dim-top: 0.08;
+            --bg-dim-bottom: 0.28;
+            --bg-overlay-start: 0.12;
+            --bg-overlay-end: 0.36;
+            --bg-brightness: 0.98;
+            --page-ink: #edf2f7;
+            --muted: #9aa7b7;
+            --soft: #c8d3df;
+            --panel: rgba(16, 22, 32, 0.72);
+            --panel-strong: rgba(12, 17, 25, 0.86);
+            --panel-soft: rgba(255, 255, 255, 0.06);
+            --line: rgba(205, 220, 235, 0.16);
+            --line-strong: rgba(205, 220, 235, 0.26);
+            --accent: #51d88a;
+            --accent-deep: #1fbf75;
+            --mis-blue: #46b7ff;
+            --copy-purple: #b28dff;
+            --danger: #ff6b6b;
+            --warn: #ffd166;
+            --slime-color: #65e7c1;
+            --neon-pink: #ff4fd8;
+            --neon-cyan: #44f3ff;
+            --shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(81, 216, 138, 0.72) rgba(8, 12, 18, 0.34);
+        }
+
+        *::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        *::-webkit-scrollbar-track {
+            border: 1px solid rgba(205, 220, 235, 0.08);
+            border-radius: 999px;
+            background: rgba(8, 12, 18, 0.28);
+            box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.24);
+        }
+
+        *::-webkit-scrollbar-thumb {
+            border: 2px solid rgba(8, 12, 18, 0.74);
+            border-radius: 999px;
+            background:
+                linear-gradient(180deg, rgba(68, 243, 255, 0.88), rgba(81, 216, 138, 0.86));
+            box-shadow: 0 0 12px rgba(68, 243, 255, 0.2);
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background:
+                linear-gradient(180deg, rgba(255, 209, 102, 0.94), rgba(81, 216, 138, 0.92));
+        }
+
+        *::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            overflow: hidden;
+            color: var(--page-ink);
+            font-family: var(--font-ui);
+            background: #0d1219;
+            text-shadow: 0 0 12px rgba(68, 243, 255, 0.12);
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        .img-background {
+            position: fixed;
+            inset: 0;
+            z-index: -2;
+            background:
+                linear-gradient(rgba(7, 10, 16, var(--bg-dim-top)), rgba(7, 10, 16, var(--bg-dim-bottom))),
+                var(--bg-image);
+            background-size: cover;
+            background-position: center;
+            filter: saturate(1.12) brightness(var(--bg-brightness));
+        }
+
+        .img-background::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background:
+                radial-gradient(circle at 22% 18%, rgba(70, 183, 255, 0.22), transparent 32%),
+                radial-gradient(circle at 86% 80%, rgba(81, 216, 138, 0.18), transparent 34%),
+                linear-gradient(135deg, rgba(10, 14, 21, var(--bg-overlay-start)), rgba(10, 14, 21, var(--bg-overlay-end)));
+        }
+
+        .container {
+            display: flex;
+            gap: 16px;
+            height: calc(100vh - 32px);
+            min-height: 560px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .sidebar {
+            width: 360px;
+            min-width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: 100%;
+        }
+
+        .panel,
+        .main-editor {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            backdrop-filter: blur(18px);
+            box-shadow:
+                var(--shadow),
+                inset 0 0 24px rgba(68, 243, 255, 0.03),
+                0 0 22px rgba(70, 183, 255, 0.08);
+        }
+
+        .panel {
+            padding: 14px;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            min-height: 28px;
+            margin-bottom: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--soft);
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .panel-title span {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title span::before {
+            content: "";
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 14px currentColor;
+        }
+
+        .panel-file {
+            position: relative;
+            background: linear-gradient(180deg, rgba(18, 30, 43, 0.9), rgba(12, 17, 25, 0.76));
+            border-color: rgba(70, 183, 255, 0.45);
+        }
+
+        .panel-file .panel-title {
+            color: var(--mis-blue);
+        }
+
+        .panel-music {
+            background: linear-gradient(180deg, rgba(54, 42, 78, 0.62), rgba(20, 18, 29, 0.78));
+            border-color: rgba(178, 141, 255, 0.44);
+        }
+
+        .panel-music .panel-title {
+            color: var(--copy-purple);
+        }
+
+        .panel-visual {
+            flex: 0 0 auto;
+            padding: 10px 12px;
+            background: linear-gradient(180deg, rgba(42, 31, 68, 0.6), rgba(10, 20, 32, 0.78));
+            border-color: rgba(255, 79, 216, 0.4);
+        }
+
+        .panel-visual .panel-title {
+            min-height: 22px;
+            margin-bottom: 6px;
+            color: var(--neon-pink);
+        }
+
+        .panel-skills {
+            flex: 2 1 0;
+            min-height: 260px;
+            max-height: none;
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(180deg, rgba(23, 47, 40, 0.68), rgba(12, 17, 25, 0.76));
+            border-color: rgba(81, 216, 138, 0.42);
+        }
+
+        .panel-skills .panel-title {
+            color: var(--accent);
+        }
+
+        .panel-log {
+            height: 104px;
+            overflow-y: auto;
+            scrollbar-gutter: stable;
+            background: linear-gradient(180deg, rgba(63, 32, 36, 0.58), rgba(12, 17, 25, 0.76));
+            border-color: rgba(255, 107, 107, 0.38);
+            font-size: 12px;
+        }
+
+        .panel-log .panel-title {
+            color: var(--danger);
+            margin-bottom: 8px;
+        }
+
+        .file-name {
+            min-height: 18px;
+            margin: 2px 0 10px;
+            color: var(--muted);
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .btn {
+            min-height: 36px;
+            border: 1px solid transparent;
+            padding: 8px 12px;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-weight: 700;
+            transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn.primary {
+            width: 100%;
+            background: rgba(70, 183, 255, 0.92);
+        }
+
+        .btn.success {
+            width: 100%;
+            margin-top: 8px;
+            background: rgba(31, 191, 117, 0.96);
+        }
+
+        .btn.replace-combo {
+            background: rgba(255, 209, 102, 0.82);
+            border-color: rgba(255, 209, 102, 0.28);
+            color: #172014;
+        }
+
+        .btn.music {
+            width: 100%;
+            background: rgba(178, 141, 255, 0.88);
+            font-size: 12px;
+        }
+
+        .btn.visual {
+            flex: 1;
+            background: rgba(255, 79, 216, 0.82);
+        }
+
+        .btn.reset {
+            flex: 1;
+            background: rgba(68, 243, 255, 0.18);
+            border-color: rgba(68, 243, 255, 0.34);
+            color: #dffcff;
+        }
+
+        .btn.danger {
+            background: rgba(255, 107, 107, 0.9);
+        }
+
+        .btn.neutral {
+            background: rgba(118, 132, 151, 0.62);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn.restore-output {
+            min-height: 28px;
+            padding: 5px 10px;
+            border-color: rgba(255, 209, 102, 0.36);
+            color: #ffe8a3;
+            background: rgba(255, 209, 102, 0.14);
+            font-size: 12px;
+            box-shadow: inset 0 0 14px rgba(255, 209, 102, 0.06);
+        }
+
+        .btn.restore-output:hover {
+            border-color: rgba(255, 209, 102, 0.74);
+            background: rgba(255, 174, 66, 0.72);
+            color: #fff8df;
+        }
+
+        .file-title-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn.background-toggle {
+            min-height: 28px;
+            padding: 5px 12px;
+            border-color: rgba(70, 183, 255, 0.38);
+            color: #dff5ff;
+            background: rgba(70, 183, 255, 0.14);
+            font-size: 12px;
+            box-shadow: inset 0 0 14px rgba(70, 183, 255, 0.06);
+        }
+
+        .btn.background-toggle.active,
+        .btn.background-toggle:hover {
+            border-color: rgba(70, 183, 255, 0.76);
+            background: rgba(70, 183, 255, 0.66);
+            color: #ffffff;
+        }
+
+        .background-popover {
+            position: absolute;
+            top: 46px;
+            right: 12px;
+            z-index: 40;
+            width: 330px;
+            padding: 14px;
+            border: 1px solid rgba(255, 79, 216, 0.42);
+            border-radius: 8px;
+            background: rgba(17, 18, 28, 0.96);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34), 0 0 18px rgba(255, 79, 216, 0.14);
+            backdrop-filter: blur(18px);
+        }
+
+        .background-popover.hidden {
+            display: none;
+        }
+
+        .import-copy {
+            margin: 0;
+            color: var(--soft);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .preset-card {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn.import-combos {
+            min-width: 120px;
+            min-height: 32px;
+            padding: 7px 8px;
+            background: rgba(31, 191, 117, 0.92);
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 300;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: rgba(4, 7, 12, 0.62);
+            backdrop-filter: blur(8px);
+        }
+
+        .modal-backdrop.hidden {
+            display: none;
+        }
+
+        .combo-import-modal {
+            width: min(720px, calc(100vw - 48px));
+            border: 1px solid rgba(81, 216, 138, 0.42);
+            border-radius: 8px;
+            background: rgba(12, 17, 25, 0.96);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46), 0 0 24px rgba(81, 216, 138, 0.12);
+            overflow: hidden;
+        }
+
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(205, 220, 235, 0.12);
+        }
+
+        .modal-head strong {
+            color: var(--accent);
+            font-size: 14px;
+        }
+
+        .modal-body {
+            padding: 14px;
+        }
+
+        .combo-import-text {
+            width: 100%;
+            height: min(420px, 48vh);
+            resize: vertical;
+            padding: 10px;
+            border: 1px solid rgba(70, 183, 255, 0.28);
+            border-radius: 7px;
+            outline: none;
+            color: var(--page-ink);
+            background: rgba(0, 0, 0, 0.28);
+            font-family: var(--font-code);
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .combo-import-text:focus {
+            border-color: rgba(81, 216, 138, 0.7);
+            box-shadow: 0 0 0 3px rgba(81, 216, 138, 0.12);
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 12px 14px;
+            border-top: 1px solid rgba(205, 220, 235, 0.12);
+        }
+
+        .btn.blue {
+            background: rgba(70, 183, 255, 0.84);
+        }
+
+        .mini-btn {
+            width: 30px;
+            height: 30px;
+            min-height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border-radius: 6px;
+            background: rgba(81, 216, 138, 0.95);
+        }
+
+        audio {
+            width: 100%;
+            height: 34px;
+            margin-top: 4px;
+            filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.24));
+        }
+
+        .bg-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .bg-name {
+            min-height: 18px;
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .bg-range {
+            margin-top: 10px;
+        }
+
+        .bg-range label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            color: var(--soft);
+            font-size: 12px;
+        }
+
+        .bg-range input[type="range"] {
+            width: 100%;
+            accent-color: var(--neon-cyan);
+        }
+
+        .skill-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding-right: 6px;
+            scrollbar-gutter: stable;
+        }
+
+        .skill-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 30px;
+            margin: -2px 0 10px;
+        }
+
+        .skill-back {
+            width: 30px;
+            height: 28px;
+            min-height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            color: var(--soft);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .skill-breadcrumb {
+            min-width: 0;
+            color: var(--muted);
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .skill-item {
+            position: relative;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border: 1px solid rgba(81, 216, 138, 0.22);
+            border-left: 4px solid var(--accent);
+            border-radius: 7px;
+            background: rgba(12, 17, 25, 0.5);
+            cursor: pointer;
+            transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+        }
+
+        .skill-item.has-action {
+            padding-right: 44px;
+        }
+
+        .skill-item:hover {
+            transform: translateX(2px);
+            border-color: rgba(81, 216, 138, 0.5);
+            background: rgba(25, 55, 46, 0.7);
+        }
+
+        .skill-item.team {
+            border-left-color: var(--mis-blue);
+        }
+
+        .skill-item.role {
+            border-left-color: var(--copy-purple);
+        }
+
+        .skill-item.combo {
+            border-left-color: var(--accent);
+        }
+
+        .skill-item.combo.replace-source {
+            border-color: rgba(255, 209, 102, 0.44);
+            background: rgba(255, 209, 102, 0.08);
+        }
+
+        .skill-item.combo.has-replace-select {
+            padding-right: 54px;
+        }
+
+        .combo-replace-select {
+            position: absolute;
+            top: 50%;
+            right: 14px;
+            width: 26px;
+            height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 209, 102, 0.24);
+            border-radius: 6px;
+            background: rgba(255, 209, 102, 0.08);
+            transform: translateY(-50%);
+            cursor: pointer;
+        }
+
+        .combo-replace-select input {
+            width: 15px;
+            height: 15px;
+            margin: 0;
+            accent-color: var(--warn);
+            cursor: pointer;
+        }
+
+        .skill-name {
+            display: block;
+            margin-bottom: 2px;
+            color: var(--page-ink);
+            font-size: 13px;
+        }
+
+        .skill-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .skill-delete {
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            width: 26px;
+            height: 26px;
+            min-height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid rgba(255, 107, 107, 0.26);
+            border-radius: 6px;
+            color: #ffd8d8;
+            background: rgba(255, 107, 107, 0.16);
+            transform: translateY(-50%);
+        }
+
+        .skill-delete:hover {
+            background: rgba(255, 107, 107, 0.32);
+            box-shadow: none;
+        }
+
+        .skill-count,
+        .hint {
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .hint {
+            margin: 8px 0 0;
+        }
+
+        .empty-state {
+            padding: 12px;
+            border: 1px dashed rgba(255, 255, 255, 0.16);
+            border-radius: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .main-editor {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            overflow: hidden;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+
+        .toolbar-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-right: auto;
+        }
+
+        .knowledge-box {
+            position: relative;
+        }
+
+        .knowledge-toggle {
+            min-width: 170px;
+            border-color: rgba(81, 216, 138, 0.34);
+            color: #dfffea;
+            background: rgba(81, 216, 138, 0.14);
+            box-shadow: inset 0 0 18px rgba(81, 216, 138, 0.05);
+        }
+
+        .terms-toggle {
+            min-width: 140px;
+            border-color: rgba(70, 183, 255, 0.36);
+            color: #dff5ff;
+            background: rgba(70, 183, 255, 0.14);
+            box-shadow: inset 0 0 18px rgba(70, 183, 255, 0.05);
+        }
+
+        .terms-toggle.active,
+        .terms-toggle:hover,
+        .knowledge-toggle.active,
+        .knowledge-toggle:hover {
+            color: #ffffff;
+        }
+
+        .terms-toggle.active,
+        .terms-toggle:hover {
+            border-color: rgba(70, 183, 255, 0.76);
+            background: rgba(70, 183, 255, 0.68);
+        }
+
+        .knowledge-toggle.active,
+        .knowledge-toggle:hover {
+            border-color: rgba(81, 216, 138, 0.72);
+            background: rgba(31, 191, 117, 0.72);
+        }
+
+        .knowledge-panel {
+            position: absolute;
+            top: calc(100% + 10px);
+            right: 0;
+            z-index: 30;
+            width: min(620px, 72vw);
+            max-height: min(680px, calc(100vh - 150px));
+            overflow: auto;
+            padding: 14px;
+            border: 1px solid rgba(81, 216, 138, 0.42);
+            border-radius: 8px;
+            color: var(--page-ink);
+            background: rgba(10, 16, 23, 0.96);
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38), 0 0 22px rgba(81, 216, 138, 0.12);
+            backdrop-filter: blur(18px);
+        }
+
+        .knowledge-panel.hidden {
+            display: none;
+        }
+
+        .knowledge-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .knowledge-head strong {
+            color: var(--accent);
+            font-size: 15px;
+            text-shadow: 0 0 12px rgba(81, 216, 138, 0.42);
+        }
+
+        .knowledge-close {
+            width: 28px;
+            height: 28px;
+            min-height: 28px;
+            padding: 0;
+            border-color: rgba(255, 107, 107, 0.28);
+            color: #ffd8d8;
+            background: rgba(255, 107, 107, 0.16);
+        }
+
+        .knowledge-copy {
+            margin: 0 0 10px;
+            color: var(--soft);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .knowledge-table {
+            width: 100%;
+            border-collapse: collapse;
+            overflow: hidden;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .knowledge-table th,
+        .knowledge-table td {
+            padding: 7px 8px;
+            border: 1px solid rgba(205, 220, 235, 0.14);
+            text-align: left;
+        }
+
+        .knowledge-table th {
+            color: var(--warn);
+            background: rgba(255, 209, 102, 0.08);
+        }
+
+        .knowledge-table td:first-child {
+            width: 86px;
+            color: #8bd3ff;
+            font-family: var(--font-code);
+            font-weight: 800;
+        }
+
+        .knowledge-example {
+            margin: 12px 0 0;
+            padding: 10px;
+            border: 1px solid rgba(70, 183, 255, 0.22);
+            border-radius: 6px;
+            color: #d8e8f7;
+            background: rgba(70, 183, 255, 0.06);
+            font-family: var(--font-code);
+            font-size: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        #totalFrameCount {
+            min-width: 170px;
+            padding: 9px 12px;
+            border: 1px solid rgba(255, 209, 102, 0.3);
+            border-radius: 8px;
+            background: rgba(255, 209, 102, 0.1);
+            color: var(--warn);
+            font-family: var(--font-code);
+            font-size: 15px;
+            font-weight: 700;
+            text-align: right;
+            text-shadow: 0 0 12px rgba(255, 209, 102, 0.48);
+        }
+
+        .output-container {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 70px minmax(280px, 1fr) minmax(280px, 1fr);
+            gap: 8px;
+            align-content: start;
+            overflow: auto;
+            scrollbar-gutter: stable;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-left: 4px solid var(--mis-blue);
+            border-radius: 8px;
+            background: rgba(8, 12, 18, 0.44);
+        }
+
+        .grid-header {
+            position: sticky;
+            top: 0;
+            z-index: 3;
+            min-height: 46px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 209, 102, 0.18);
+            border-radius: 7px;
+            color: var(--warn);
+            font-weight: 800;
+            background: rgba(13, 17, 23, 0.92);
+            backdrop-filter: blur(12px);
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: 8px;
+        }
+
+        .role-alias {
+            width: 96px;
+            min-width: 70px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(81, 216, 138, 0.24);
+            border-radius: 6px;
+            color: var(--accent);
+            outline: none;
+            padding: 4px 7px;
+            font-size: 12px;
+        }
+
+        .op-btn {
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            transition: background 0.16s ease, transform 0.16s ease;
+            user-select: none;
+        }
+
+        .op-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .timeline-time {
+            min-height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            align-self: stretch;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--warn);
+            font-family: var(--font-code);
+            font-size: 14px;
+            font-weight: 800;
+            text-shadow: 0 0 10px rgba(255, 209, 102, 0.5);
+        }
+
+        .script-row {
+            min-height: 42px;
+            display: grid;
+            grid-template-columns: 24px 82px 84px minmax(260px, 1fr) 28px;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            border: 1px solid transparent;
+            border-radius: 7px;
+            background: rgba(255, 255, 255, 0.055);
+            transition: border-color 0.16s ease, background 0.16s ease;
+        }
+
+        .script-row:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .script-row.empty {
+            display: flex;
+            justify-content: center;
+            color: rgba(200, 211, 223, 0.42);
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.025);
+        }
+
+        .script-row.selected {
+            border-color: rgba(81, 216, 138, 0.72);
+            background: rgba(81, 216, 138, 0.14);
+        }
+
+        .script-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+        }
+
+        .cmd-input,
+        .frame-input,
+        .note-input {
+            min-width: 0;
+            height: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            outline: none;
+            color: var(--page-ink);
+            background: rgba(0, 0, 0, 0.28);
+            font-family: var(--font-code);
+        }
+
+        .cmd-input {
+            color: #8bd3ff;
+            padding: 3px 7px;
+        }
+
+        .frame-input {
+            text-align: center;
+            color: #ffffff;
+            padding: 3px;
+        }
+
+        .note-input {
+            padding: 3px 8px;
+            color: #e7edf6;
+            font-family: var(--font-ui);
+        }
+
+        .note-command-cell {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: minmax(100px, 1fr) 148px;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .quick-command-pad {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 3px;
+            align-items: center;
+            padding: 3px;
+            border: 1px solid rgba(70, 183, 255, 0.2);
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.18);
+        }
+
+        .quick-command-option {
+            height: 17px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #bcd7e7;
+            font-family: var(--font-code);
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+        }
+
+        .quick-command-option input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .quick-command-option span {
+            min-width: 12px;
+            text-align: center;
+        }
+
+        .quick-command-option:has(input:checked) {
+            color: #071018;
+            border-color: rgba(81, 216, 138, 0.78);
+            background: linear-gradient(180deg, rgba(104, 232, 159, 0.95), rgba(31, 191, 117, 0.9));
+            box-shadow: 0 0 10px rgba(81, 216, 138, 0.22);
+        }
+
+        .quick-command-option:hover {
+            border-color: rgba(70, 183, 255, 0.56);
+            background: rgba(70, 183, 255, 0.14);
+        }
+
+        .cmd-input:focus,
+        .frame-input:focus,
+        .note-input:focus,
+        .role-alias:focus {
+            border-color: rgba(70, 183, 255, 0.7);
+            box-shadow: 0 0 0 3px rgba(70, 183, 255, 0.12);
+        }
+
+        .log-entry {
+            margin-top: 6px;
+            line-height: 1.5;
+            color: var(--soft);
+        }
+
+        .log-time {
+            color: var(--muted);
+            font-family: var(--font-code);
+        }
+
+        #pet-container {
+            position: fixed;
+            right: 44px;
+            bottom: 32px;
+            z-index: 100;
+            cursor: pointer;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        #pet-container:hover {
+            transform: translateY(-2px) scale(1.07);
+        }
+
+        #pet-container:active {
+            transform: scale(0.92);
+        }
+
+        .gugugaga-pet {
+            width: 150px;
+            height: auto;
+            display: block;
+            position: relative;
+            z-index: 2;
+            transform-origin: 50% 100%;
+            animation: gugugaga-float 4.2s infinite ease-in-out;
+            filter:
+                drop-shadow(0 16px 20px rgba(0, 0, 0, 0.36))
+                drop-shadow(0 0 18px rgba(68, 243, 255, 0.2));
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        .pet-shadow {
+            position: absolute;
+            left: 20px;
+            right: 20px;
+            bottom: -5px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.32);
+            filter: blur(10px);
+            transform-origin: center;
+            animation: pet-shadow-pulse 4.2s infinite ease-in-out;
+        }
+
+        .bubble {
+            position: absolute;
+            right: 8px;
+            bottom: 205px;
+            max-width: min(300px, calc(100vw - 40px));
+            padding: 9px 14px;
+            border: 2px solid var(--neon-cyan);
+            border-radius: 18px;
+            color: #203139;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+            font-size: 13px;
+            font-weight: 800;
+            white-space: nowrap;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            pointer-events: none;
+        }
+
+        .bubble.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .bubble::after {
+            content: "";
+            position: absolute;
+            right: 42px;
+            bottom: -8px;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 8px solid white;
+        }
+
+        @keyframes gugugaga-float {
+            0%, 100% {
+                transform: translateY(0) rotate(-1deg) scale(1);
+            }
+
+            50% {
+                transform: translateY(-8px) rotate(1deg) scale(1.025);
+            }
+        }
+
+        @keyframes pet-shadow-pulse {
+            0%, 100% {
+                transform: scaleX(1);
+                opacity: 0.58;
+            }
+
+            50% {
+                transform: scaleX(0.82);
+                opacity: 0.34;
+            }
+        }
+
+        @media (max-width: 980px) {
+            body {
+                overflow: auto;
+            }
+
+            .container {
+                min-height: auto;
+                height: auto;
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                min-width: 0;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .panel-skills,
+            .panel-log {
+                min-height: 170px;
+            }
+
+            .main-editor {
+                min-height: 560px;
+            }
+
+            #pet-container {
+                right: 22px;
+                bottom: 20px;
+            }
+        }
+
+        @media (max-width: 680px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                height: auto;
+            }
+
+            .sidebar {
+                grid-template-columns: 1fr;
+            }
+
+            .toolbar {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            #totalFrameCount {
+                width: 100%;
+                text-align: left;
+            }
+
+            .output-container {
+                grid-template-columns: 58px minmax(250px, 1fr) minmax(250px, 1fr);
+            }
+
+            .gugugaga-pet {
+                width: 118px;
+            }
+
+            .bubble {
+                bottom: 170px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="img-background"></div>
+
+<div id="pet-container" onclick="slimeClick()" title="点我一下">
+    <div id="slime-bubble" class="bubble">咕咕嘎嘎待命！</div>
+    <div class="pet-shadow"></div>
+    <img class="gugugaga-pet" src="assets/gugugaga-pet.png" alt="咕咕嘎嘎">
+</div>
+
+<div class="container">
+    <aside class="sidebar">
+        <section class="panel panel-file">
+            <div class="panel-title">
+                <span>栞的 TAS 工具</span>
+                <div class="file-title-actions">
+                    <button class="btn background-toggle" id="backgroundToggle" onclick="toggleBackgroundTools()">背景</button>
+                    <button class="btn restore-output" onclick="restoreDefaultOutput()">恢复默认</button>
+                </div>
+            </div>
+            <div class="background-popover hidden" id="backgroundTools">
+                <input type="file" id="bgUpload" accept="image/*" style="display:none" onchange="loadBackground(this)">
+                <div class="bg-actions">
+                    <button class="btn visual" onclick="document.getElementById('bgUpload').click()">替换背景</button>
+                    <button class="btn reset" onclick="resetBackground()">恢复默认</button>
+                </div>
+                <div class="bg-range">
+                    <label for="bgClarity">背景清晰度 <span id="bgClarityValue">78%</span></label>
+                    <input type="range" id="bgClarity" min="35" max="100" value="78" oninput="setBackgroundClarity(this.value)" onchange="saveBackgroundClarity(this.value)">
+                </div>
+                <div class="bg-name" id="bgName">当前背景：默认壁纸</div>
+            </div>
+            <div class="file-name" id="fileName">尚未接入 .mis 文件</div>
+            <button class="btn primary" onclick="openLocalFile()">接入 .mis 文件</button>
+            <button class="btn success" id="saveBtn" style="display:none;" onclick="saveToLocalFile()">同步覆盖源文件</button>
+        </section>
+
+        <section class="panel panel-music">
+            <div class="panel-title"><span>BGM 节奏台</span></div>
+            <input type="file" id="audioUpload" accept="audio/*" style="display:none" onchange="loadMusic(this)">
+            <button class="btn music" onclick="document.getElementById('audioUpload').click()">载入 BGM</button>
+            <audio id="bgmPlayer" controls loop></audio>
+        </section>
+
+        <section class="panel panel-visual">
+            <div class="panel-title"><span>导入连招</span></div>
+            <div class="preset-card">
+                <p class="import-copy">粘贴角色招式表，自动转换为连招库条目。</p>
+                <button class="btn import-combos" onclick="openComboImport()">导入连招</button>
+            </div>
+        </section>
+
+        <section class="panel panel-skills">
+            <div class="panel-title">
+                <span id="skillPanelTitle">所有队伍</span>
+                <button class="btn mini-btn" id="skillAddBtn" onclick="handleSkillLibraryAdd()" title="新增队伍">+</button>
+            </div>
+            <div class="skill-nav">
+                <button class="btn skill-back" id="skillBackBtn" onclick="skillBack()" title="返回上一层" style="display:none;">‹</button>
+                <div class="skill-breadcrumb" id="skillBreadcrumb">所有队伍</div>
+            </div>
+            <div class="skill-scroll" id="skillList"></div>
+            <p class="hint" id="skillHint">点击队伍进入角色列表；右键点击条目可删除</p>
+        </section>
+
+        <section class="panel panel-log" id="changeLog">
+            <div class="panel-title"><span>操作日志</span></div>
+        </section>
+    </aside>
+
+    <main class="main-editor">
+        <div class="toolbar">
+            <div class="toolbar-actions">
+                <button class="btn danger" onclick="deleteSelected()">删除选中</button>
+                <button class="btn blue" onclick="selectAll()">全选</button>
+                <button class="btn neutral" onclick="deselectAll()">取消全选</button>
+                <button class="btn replace-combo" onclick="replaceSelectedWithCombo()">替换连招</button>
+            </div>
+            <div class="knowledge-box">
+                <button class="btn terms-toggle" id="termsToggle" onclick="toggleTerms()">02术语</button>
+                <div class="knowledge-panel hidden" id="termsPanel">
+                    <div class="knowledge-head">
+                        <strong>02 术语速查</strong>
+                        <button class="btn knowledge-close" onclick="toggleTerms(false)" title="关闭">×</button>
+                    </div>
+                    <p class="knowledge-copy">这些是连段/指令解说里常见的简写，主要用于描述输入方式、取消关系和招式类型。</p>
+                    <table class="knowledge-table">
+                        <thead>
+                            <tr><th>术语</th><th>含义</th><th>说明</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>F</td><td>帧</td><td>1/60 秒，游戏内最小时间单位</td></tr>
+                            <tr><td>J</td><td>Jump，跳跃</td><td>常用于跳入、空中动作</td></tr>
+                            <tr><td>~</td><td>目押 / 非取消连接</td><td>表示不是取消，要按时机连接</td></tr>
+                            <tr><td>&gt;、→</td><td>取消连接</td><td>包含除派生取消外的一切取消</td></tr>
+                            <tr><td>&gt;&gt;</td><td>派生连接</td><td>招式派生到下一段</td></tr>
+                            <tr><td>·</td><td>顺序输入</td><td>按顺序依次输入，不可同时按</td></tr>
+                            <tr><td>xn</td><td>乘以 n</td><td>表示重复 n 次</td></tr>
+                            <tr><td>()</td><td>备注</td><td>补充说明用</td></tr>
+                            <tr><td>(n)</td><td>命中 n 段</td><td>例如 0 表示不中或挥空</td></tr>
+                            <tr><td>P</td><td>Punch，拳</td><td>泛指轻拳、中拳、重拳等</td></tr>
+                            <tr><td>K</td><td>Kick，踢</td><td>泛指轻脚、中脚、重脚等</td></tr>
+                            <tr><td>CH</td><td>Counter-Hit</td><td>破招、打康</td></tr>
+                            <tr><td>GB</td><td>Guard-Break</td><td>破防</td></tr>
+                            <tr><td>GP</td><td>Guard-Point</td><td>架招、防护点</td></tr>
+                            <tr><td>{x}</td><td>里取消</td><td>x 为普通技</td></tr>
+                            <tr><td>[]</td><td>前提条件</td><td>方括号内是不在连段里显示的条件</td></tr>
+                            <tr><td>DC</td><td>发动模式中的任意取消</td><td>模式中可用的取消</td></tr>
+                            <tr><td>SC</td><td>超级取消</td><td>Special / Super Cancel 语境下使用</td></tr>
+                            <tr><td>GC</td><td>防御取消</td><td>有回避和反击两种，常写 GCAB / GCCD</td></tr>
+                            <tr><td>Q 发动</td><td>快速发动</td><td>地面普通技或特殊技命中按 BC</td></tr>
+                            <tr><td>Q 回避</td><td>快速回避</td><td>地面普通技或特殊技命中按 AB</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="knowledge-box">
+                <button class="btn knowledge-toggle" id="knowledgeToggle" onclick="toggleKnowledge()">基础知识</button>
+                <div class="knowledge-panel hidden" id="knowledgePanel">
+                    <div class="knowledge-head">
+                        <strong>MacroLua 语法速查</strong>
+                        <button class="btn knowledge-close" onclick="toggleKnowledge(false)" title="关闭">×</button>
+                    </div>
+                    <p class="knowledge-copy">一行通常写成“指令 + 帧数 + 逗号”，例如 <code>(d.)1,</code>。括号里是该帧输入，点号 <code>.</code> 表示和下一帧分隔。</p>
+                    <table class="knowledge-table">
+                        <thead>
+                            <tr><th>符号</th><th>含义</th><th>备注</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>U / D / L / R</td><td>上 / 下 / 左 / 右</td><td>本工具快捷键会写入 u/d/l/r</td></tr>
+                            <tr><td>1 / 2 / 3 / 4</td><td>A / B / C / D</td><td>基础攻击键</td></tr>
+                            <tr><td>S / `</td><td>Start / Select</td><td>系统按键</td></tr>
+                            <tr><td>C / @ / ~</td><td>Coin / Test / Reset</td><td>@ 可进入 BIOS</td></tr>
+                            <tr><td>$1 / &amp;1</td><td>存档 1 / 读档 1</td><td>数字可换成其他槽位</td></tr>
+                            <tr><td>&lt; / / / &gt;</td><td>P1 开始 / P2 开始 / 结束</td><td>用于区分玩家指令段</td></tr>
+                            <tr><td>#</td><td>注释</td><td># 后面的内容不识别为玩家指令</td></tr>
+                            <tr><td>(...)n</td><td>循环</td><td>例如 <code>(...)3</code> 表示循环 3 次</td></tr>
+                            <tr><td>Wn</td><td>等待 n 帧</td><td>例如 <code>W60</code> 表示等待 60 帧</td></tr>
+                            <tr><td>.</td><td>分隔符</td><td>分隔上一帧和下一帧</td></tr>
+                        </tbody>
+                    </table>
+                    <pre class="knowledge-example">&amp;1
+
+&lt; # Player 1 指令
+...
+
+/ # Player 2 指令
+...
+
+&gt;</pre>
+                </div>
+            </div>
+            <span id="totalFrameCount">同步进度: 0 帧</span>
+        </div>
+        <div id="timeline" class="output-container"></div>
+    </main>
+</div>
+
+<div class="modal-backdrop hidden" id="comboImportModal">
+    <div class="combo-import-modal">
+        <div class="modal-head">
+            <strong>导入连招文本</strong>
+            <button class="btn knowledge-close" onclick="closeComboImport()" title="关闭">×</button>
+        </div>
+        <div class="modal-body">
+            <textarea class="combo-import-text" id="comboImportText" placeholder="粘贴格式示例：
+草薙京
+
+投技
+
+釟铁←or→+C
+
+特殊技
+
+外式轰斧阳→+B"></textarea>
+            <p class="hint">第一行作为角色名；空行会自动忽略；默认导入到“拳皇2002”。</p>
+        </div>
+        <div class="modal-actions">
+            <button class="btn neutral" onclick="closeComboImport()">取消</button>
+            <button class="btn import-combos" onclick="importCombosFromText()">确认导入</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let fileHandle, rawContentArray = [], lastCheckedIdx = null;
+    let skillLibrary = loadSkillLibrary();
+    let skillView = { teamId: null, roleId: null };
+    let replacementComboId = null;
+    const player = document.getElementById('bgmPlayer');
+    const defaultBgLabel = '默认壁纸';
+
+    function escapeHTML(value) {
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[ch]));
+    }
+
+    function toggleKnowledge(force) {
+        const panel = document.getElementById('knowledgePanel');
+        const toggle = document.getElementById('knowledgeToggle');
+        const shouldOpen = typeof force === 'boolean' ? force : panel.classList.contains('hidden');
+        if (shouldOpen) toggleTerms(false);
+        panel.classList.toggle('hidden', !shouldOpen);
+        toggle.classList.toggle('active', shouldOpen);
+    }
+
+    function toggleTerms(force) {
+        const panel = document.getElementById('termsPanel');
+        const toggle = document.getElementById('termsToggle');
+        const shouldOpen = typeof force === 'boolean' ? force : panel.classList.contains('hidden');
+        if (shouldOpen) toggleKnowledge(false);
+        panel.classList.toggle('hidden', !shouldOpen);
+        toggle.classList.toggle('active', shouldOpen);
+    }
+
+    function toggleBackgroundTools(force) {
+        const panel = document.getElementById('backgroundTools');
+        const toggle = document.getElementById('backgroundToggle');
+        const shouldOpen = typeof force === 'boolean' ? force : panel.classList.contains('hidden');
+        panel.classList.toggle('hidden', !shouldOpen);
+        toggle.classList.toggle('active', shouldOpen);
+    }
+
+    function restoreDefaultOutput() {
+        const message = [
+            '确定要将当前输出文本恢复默认吗？',
+            '',
+            '当前编辑区里的指令帧、备注和勾选状态都会被清空。',
+            '这一步不会立刻覆盖源文件；只有再点击“同步覆盖源文件”才会写回 .mis。'
+        ].join('\n');
+
+        if (!confirm(message)) return;
+
+        rawContentArray = [
+            { type: 'header', content: '< # Player 1' },
+            { type: 'data', cmd: '(3.)', frame: 1, note: '', selected: false },
+            { type: 'header', content: '/ # Player 2' },
+            { type: 'data', cmd: '(3.)', frame: 1, note: '', selected: false }
+        ];
+        lastCheckedIdx = null;
+        renderTimeline();
+        addLog('输出文本已恢复默认');
+        slimeTalk('已恢复默认输出，确认无误后再同步覆盖源文件。');
+    }
+
+    function slimeTalk(text, duration = 3000) {
+        const bubble = document.getElementById('slime-bubble');
+        bubble.innerText = text;
+        bubble.classList.add('show');
+        clearTimeout(window.slimeTimer);
+        window.slimeTimer = setTimeout(() => bubble.classList.remove('show'), duration);
+    }
+
+    function slimeClick() {
+        slimeTalk("咕咕嘎嘎：栞的uid:14178091");
+    }
+
+    function saveAlias(p, val) {
+        sessionStorage.setItem('p' + p + '_alias', val);
+    }
+
+    function getAlias(p) {
+        return sessionStorage.getItem('p' + p + '_alias') || '';
+    }
+
+    async function saveToLocalFile() {
+        if (!fileHandle) return;
+        try {
+            const options = { mode: 'readwrite' };
+            if (await fileHandle.queryPermission(options) !== 'granted') {
+                await fileHandle.requestPermission(options);
+            }
+
+            let p1Lines = ["< # Player 1"], p2Lines = ["/ # Player 2"], curP = 0;
+            rawContentArray.forEach(item => {
+                if (item.type === 'header') {
+                    if (item.content.includes('<')) curP = 1;
+                    else if (item.content.includes('/')) curP = 2;
+                } else if (item.type === 'data') {
+                    let line = `${item.cmd}${item.frame},`;
+                    if (item.note && item.note.trim() !== "") line += ` # ${item.note}`;
+                    if (curP === 1) p1Lines.push(line);
+                    else if (curP === 2) p2Lines.push(line);
+                }
+            });
+
+            const finalOutput = p1Lines.join('\n') + '\n\n\n' + p2Lines.join('\n') + '\n\n>';
+            const writable = await fileHandle.createWritable();
+            await writable.write(finalOutput);
+            await writable.close();
+            addLog("同步覆盖成功");
+            slimeTalk("文件保存好啦！辛苦了导演~");
+        } catch (err) {
+            addLog("同步冲突，请重试");
+        }
+    }
+
+    async function openLocalFile() {
+        if (!window.showOpenFilePicker) {
+            alert("当前浏览器不支持文件系统访问，请用新版 Chromium / Edge 通过 localhost 打开页面。");
+            return;
+        }
+
+        try {
+            [fileHandle] = await window.showOpenFilePicker({
+                types: [{
+                    description: 'MIS 文件',
+                    accept: { 'text/plain': ['.mis', '.txt'] }
+                }]
+            });
+            const text = await (await fileHandle.getFile()).text();
+            rawContentArray = text.split('\n').map(l => {
+                const t = l.trim();
+                if (!t || t === ">") return { type: 'empty' };
+                if (t.startsWith('<') || t.startsWith('/') || (t.startsWith('#') && !t.includes('('))) {
+                    return { type: 'header', content: t };
+                }
+                const m = l.match(/\((.*?)\)\s*(\d+)\s*,\s*(?:#\s*(.*))?/);
+                if (m) {
+                    let f = parseInt(m[2], 10);
+                    return {
+                        type: 'data',
+                        cmd: `(${m[1]})`,
+                        frame: isNaN(f) ? 1 : Math.max(1, f),
+                        note: m[3] || "",
+                        selected: false
+                    };
+                }
+                return { type: 'text', content: l };
+            });
+            document.getElementById('saveBtn').style.display = "block";
+            document.getElementById('fileName').innerText = fileHandle.name;
+            renderTimeline();
+            addLog(`接入: ${fileHandle.name}`);
+            slimeTalk("项目已就绪！冲冲冲！");
+        } catch (e) { }
+    }
+
+    function renderTimeline() {
+        const container = document.getElementById('timeline');
+        container.innerHTML = '';
+        let p1Data = [], p2Data = [], t1 = 0, t2 = 0, curP = 0;
+        rawContentArray.forEach((item, idx) => {
+            if (item.type === 'header') {
+                if (item.content.includes('<')) curP = 1;
+                else if (item.content.includes('/')) curP = 2;
+            } else if (item.type === 'data') {
+                if (curP === 1) {
+                    p1Data.push({...item, start: t1, oIdx: idx});
+                    t1 += item.frame;
+                } else if (curP === 2) {
+                    p2Data.push({...item, start: t2, oIdx: idx});
+                    t2 += item.frame;
+                }
+            }
+        });
+
+        document.getElementById('totalFrameCount').innerText = `同步进度: ${Math.max(t1, t2)} 帧`;
+
+        if (!rawContentArray.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.style.gridColumn = '1 / -1';
+            empty.innerText = '接入 .mis 文件后，时间轴会在这里展开。';
+            container.appendChild(empty);
+            return;
+        }
+
+        container.appendChild(document.createElement('div'));
+        container.appendChild(createHeaderUI("Player 1", 1));
+        container.appendChild(createHeaderUI("Player 2", 2));
+        const allStartTimes = Array.from(new Set([...p1Data.map(d => d.start), ...p2Data.map(d => d.start)])).sort((a, b) => a - b);
+        allStartTimes.forEach(t => {
+            const tDiv = document.createElement('div');
+            tDiv.className = 'timeline-time';
+            tDiv.innerText = t;
+            container.appendChild(tDiv);
+            container.appendChild(createRowUI(p1Data.find(d => d.start === t)));
+            container.appendChild(createRowUI(p2Data.find(d => d.start === t)));
+        });
+    }
+
+    function createHeaderUI(name, pNum) {
+        const d = document.createElement('div');
+        d.className = 'grid-header';
+        d.innerHTML = `
+            <div class="header-title">
+                <span>&lt; ${escapeHTML(name)}</span>
+                <input type="text" class="role-alias" placeholder="角色名" value="${escapeHTML(getAlias(pNum))}" onchange="saveAlias(${pNum}, this.value)">
+            </div>
+            <span class="op-btn" style="color:var(--accent)" onclick="smartInsert(${pNum})" title="添加动作">＋</span>
+        `;
+        return d;
+    }
+
+    function createRowUI(data) {
+        const d = document.createElement('div');
+        if (!data) {
+            d.className = 'script-row empty';
+            d.innerText = '保持';
+            return d;
+        }
+
+        d.className = `script-row ${data.selected ? 'selected' : ''}`;
+        d.innerHTML = `
+            <input type="checkbox" ${data.selected ? 'checked' : ''} onclick="handleCheck(event, ${data.oIdx})" title="选择此行">
+            <input type="text" class="cmd-input" value="${escapeHTML(data.cmd)}" onchange="upd(${data.oIdx},'cmd',this.value)">
+            <input type="number" class="frame-input" min="1" max="99999" value="${escapeHTML(data.frame)}" onchange="upd(${data.oIdx},'frame',parseInt(this.value, 10))">
+            <div class="note-command-cell">
+                <input type="text" class="note-input" value="${escapeHTML(data.note)}" placeholder="备注" onchange="upd(${data.oIdx},'note',this.value)">
+                ${createQuickCommandPad(data)}
+            </div>
+            <span class="op-btn" style="color:var(--danger)" onclick="remLine(${data.oIdx})" title="删除此行">×</span>
+        `;
+        return d;
+    }
+
+    const quickCommandItems = [
+        { label: '↑', value: 'U' },
+        { label: '↓', value: 'd' },
+        { label: '←', value: 'L' },
+        { label: '→', value: 'r' },
+        { label: '1', value: '1' },
+        { label: '2', value: '2' },
+        { label: '3', value: '3' },
+        { label: '4', value: '4' }
+    ];
+
+    function getCommandBody(cmd = '') {
+        const m = String(cmd).match(/^\((.*)\)$/);
+        return m ? m[1] : String(cmd).replace(/[()]/g, '');
+    }
+
+    function tokenEquals(a, b) {
+        return String(a).toLowerCase() === String(b).toLowerCase();
+    }
+
+    function hasCommandToken(body, token) {
+        return String(body).split('').some(ch => tokenEquals(ch, token));
+    }
+
+    function removeCommandToken(body, token) {
+        return String(body).split('').filter(ch => !tokenEquals(ch, token)).join('');
+    }
+
+    function createQuickCommandPad(data) {
+        const body = getCommandBody(data.cmd);
+        const options = quickCommandItems.map(item => `
+            <label class="quick-command-option" title="${escapeHTML(item.value)}">
+                <input type="checkbox" ${hasCommandToken(body, item.value) ? 'checked' : ''} onclick="toggleQuickCommand(event, ${data.oIdx}, '${item.value}')">
+                <span>${escapeHTML(item.label)}</span>
+            </label>
+        `).join('');
+        return `<div class="quick-command-pad">${options}</div>`;
+    }
+
+    function toggleQuickCommand(event, i, token) {
+        event.stopPropagation();
+        const item = rawContentArray[i];
+        if (!item || item.type !== 'data') return;
+
+        let body = getCommandBody(item.cmd);
+        if (hasCommandToken(body, token)) {
+            body = removeCommandToken(body, token);
+        } else {
+            const dotIndex = body.indexOf('.');
+            body = dotIndex === -1
+                ? `${body}${token}`
+                : `${body.slice(0, dotIndex)}${token}${body.slice(dotIndex)}`;
+        }
+
+        item.cmd = `(${body || '.'})`;
+        renderTimeline();
+    }
+
+    function upd(i, f, v) {
+        if (f === 'frame') v = Math.min(99999, Math.max(1, isNaN(v) ? 1 : v));
+        rawContentArray[i][f] = v;
+        if (f === 'frame') renderTimeline();
+    }
+
+    function selectAll() {
+        rawContentArray.forEach(i => {
+            if (i.type === 'data') i.selected = true;
+        });
+        renderTimeline();
+        addLog("已全选所有数据行");
+    }
+
+    function handleCheck(e, i) {
+        if (e.shiftKey && lastCheckedIdx !== null) {
+            const [s, f] = [i, lastCheckedIdx].sort((a, b) => a - b);
+            for (let j = s; j <= f; j++) {
+                if (rawContentArray[j].type === 'data') rawContentArray[j].selected = e.target.checked;
+            }
+        } else {
+            rawContentArray[i].selected = e.target.checked;
+        }
+        lastCheckedIdx = i;
+        renderTimeline();
+    }
+
+    function smartInsert(pNum) {
+        let lastIdx = -1, lastSelectedIdx = -1, curP = 0;
+        rawContentArray.forEach((item, idx) => {
+            if (item.type === 'header') {
+                if (item.content.includes('<')) curP = 1;
+                else if (item.content.includes('/')) curP = 2;
+            }
+            if (curP === pNum) {
+                lastIdx = idx;
+                if (item.type === 'data' && item.selected) lastSelectedIdx = idx;
+            }
+        });
+        const insertIdx = lastSelectedIdx === -1 ? lastIdx : lastSelectedIdx;
+        rawContentArray.splice(insertIdx + 1, 0, { type: 'data', cmd: '(.)', frame: 1, note: '', selected: false });
+        renderTimeline();
+        slimeTalk("添加新动作！");
+    }
+
+    function remLine(i) {
+        rawContentArray.splice(i, 1);
+        renderTimeline();
+    }
+
+    function deleteSelected() {
+        rawContentArray = rawContentArray.filter(i => !i.selected);
+        renderTimeline();
+    }
+
+    function deselectAll() {
+        rawContentArray.forEach(i => i.selected = false);
+        renderTimeline();
+    }
+
+    function addLog(m) {
+        const b = document.getElementById('changeLog');
+        const d = document.createElement('div');
+        d.className = 'log-entry';
+        d.innerHTML = `<span class="log-time">[${new Date().toLocaleTimeString()}]</span> ${escapeHTML(m)}`;
+        b.insertBefore(d, b.children[1] || null);
+    }
+
+    function loadMusic(i) {
+        if (i.files[0]) {
+            player.src = URL.createObjectURL(i.files[0]);
+            player.play();
+            slimeTalk("音乐响起，节奏感来了！");
+        }
+    }
+
+    function setBackgroundImage(dataUrl, name = defaultBgLabel) {
+        const safeUrl = String(dataUrl).replace(/["\\]/g, '\\$&');
+        document.documentElement.style.setProperty('--bg-image', `url("${safeUrl}")`);
+        document.getElementById('bgName').innerText = `当前背景：${name}`;
+    }
+
+    function setBackgroundClarity(value) {
+        const clarity = Math.min(100, Math.max(35, parseInt(value, 10) || 78));
+        const ratio = clarity / 100;
+        document.documentElement.style.setProperty('--bg-clarity', clarity);
+        document.documentElement.style.setProperty('--bg-dim-top', (0.22 - ratio * 0.18).toFixed(2));
+        document.documentElement.style.setProperty('--bg-dim-bottom', (0.58 - ratio * 0.36).toFixed(2));
+        document.documentElement.style.setProperty('--bg-overlay-start', (0.30 - ratio * 0.22).toFixed(2));
+        document.documentElement.style.setProperty('--bg-overlay-end', (0.62 - ratio * 0.34).toFixed(2));
+        document.documentElement.style.setProperty('--bg-brightness', (0.76 + ratio * 0.34).toFixed(2));
+        document.getElementById('bgClarity').value = clarity;
+        document.getElementById('bgClarityValue').innerText = `${clarity}%`;
+    }
+
+    function saveBackgroundClarity(value) {
+        const clarity = Math.min(100, Math.max(35, parseInt(value, 10) || 78));
+        localStorage.setItem('mis_bg_clarity', String(clarity));
+        addLog(`背景清晰度: ${clarity}%`);
+    }
+
+    function initBackground() {
+        const savedImage = localStorage.getItem('mis_custom_bg_image');
+        const savedName = localStorage.getItem('mis_custom_bg_name') || defaultBgLabel;
+        setBackgroundClarity(localStorage.getItem('mis_bg_clarity') || 78);
+        if (savedImage) setBackgroundImage(savedImage, savedName);
+    }
+
+    function loadBackground(input) {
+        const file = input.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            setBackgroundImage(dataUrl, file.name);
+            try {
+                localStorage.setItem('mis_custom_bg_image', dataUrl);
+                localStorage.setItem('mis_custom_bg_name', file.name);
+                addLog(`背景已替换: ${file.name}`);
+                slimeTalk("新背景已上线，霓虹感拉满！");
+            } catch (e) {
+                addLog("背景已临时替换；图片较大，无法保存到本地缓存");
+                slimeTalk("背景先换上啦，但这张图有点大~");
+            }
+        };
+        reader.onerror = () => addLog("背景读取失败，请换一张图片重试");
+        reader.readAsDataURL(file);
+        input.value = '';
+    }
+
+    function resetBackground() {
+        localStorage.removeItem('mis_custom_bg_image');
+        localStorage.removeItem('mis_custom_bg_name');
+        document.documentElement.style.removeProperty('--bg-image');
+        document.getElementById('bgName').innerText = `当前背景：${defaultBgLabel}`;
+        addLog("背景已恢复默认");
+        slimeTalk("默认背景回来了！");
+    }
+
+    function makeId(prefix) {
+        return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    const comboCategoryNames = new Set(['投技', '特殊技', '必杀技', '超必杀技', 'MAX超必杀技', '招式变化', '连续技', '新系统连续技']);
+    const comboTokenMap = {
+        '↘': 'dr',
+        '↙': 'dL',
+        '↖': 'UL',
+        '↗': 'Ur',
+        '↑': 'U',
+        '←': 'L',
+        '→': 'r',
+        '↓': 'd',
+        'A': '1',
+        'B': '2',
+        'C': '3',
+        'D': '4'
+    };
+
+    function openComboImport() {
+        document.getElementById('comboImportModal').classList.remove('hidden');
+        document.getElementById('comboImportText').focus();
+    }
+
+    function closeComboImport() {
+        document.getElementById('comboImportModal').classList.add('hidden');
+    }
+
+    function makePresetCombo(category, name, input, data = null) {
+        return {
+            id: makeId('combo'),
+            name: `${category} · ${name}`,
+            data: data || [{
+                type: 'data',
+                cmd: '(.)',
+                frame: 2,
+                note: `${name}：${input}`,
+                selected: false
+            }]
+        };
+    }
+
+    function findFirstCommandIndex(text) {
+        const arrowIndexes = ['↘', '↙', '↖', '↗', '↑', '←', '→', '↓']
+            .map(token => text.indexOf(token))
+            .filter(index => index >= 0);
+        if (arrowIndexes.length) return Math.min(...arrowIndexes);
+
+        const buttonIndex = text.search(/[ABCD]/);
+        return buttonIndex >= 0 ? buttonIndex : -1;
+    }
+
+    function comboTextToData(text, notePrefix, hasBranchMarker) {
+        const data = [];
+        if (hasBranchMarker) {
+            data.push({ type: 'data', cmd: '(.)', frame: 2, note: '派生间隔帧', selected: false });
+        }
+
+        const normalized = text
+            .replace(/or/gi, '')
+            .replace(/\s|　/g, '')
+            .replace(/[＋+／/、，,()（）]/g, '')
+            .replace(/[中近身]/g, '');
+        const sortedTokens = Object.keys(comboTokenMap).sort((a, b) => b.length - a.length);
+        let noteWritten = false;
+
+        for (let i = 0; i < normalized.length;) {
+            const token = sortedTokens.find(key => normalized.startsWith(key, i));
+            if (!token) {
+                i++;
+                continue;
+            }
+            data.push({
+                type: 'data',
+                cmd: `(${comboTokenMap[token]})`,
+                frame: 2,
+                note: noteWritten ? '' : notePrefix,
+                selected: false
+            });
+            noteWritten = true;
+            i += token.length;
+        }
+
+        if (!data.length || (hasBranchMarker && data.length === 1)) {
+            data.push({ type: 'data', cmd: '(.)', frame: 2, note: notePrefix, selected: false });
+        }
+
+        return data;
+    }
+
+    function parseComboImportText(text) {
+        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (!lines.length) return null;
+
+        const roleName = lines[0];
+        let category = '未分类';
+        let serial = 1;
+        const combos = [];
+
+        lines.slice(1).forEach(rawLine => {
+            if (comboCategoryNames.has(rawLine)) {
+                category = rawLine;
+                serial = 1;
+                return;
+            }
+
+            const hasBranchMarker = /^[┃┣┗]/.test(rawLine);
+            const cleanLine = rawLine.replace(/^[┃┣┗\s]+/, '');
+            const commandIndex = findFirstCommandIndex(cleanLine);
+            const name = commandIndex > 0 ? cleanLine.slice(0, commandIndex).trim() : `${category} ${serial}`;
+            const input = commandIndex >= 0 ? cleanLine.slice(commandIndex).trim() : cleanLine;
+            const data = comboTextToData(input, `${name}：${input}`, hasBranchMarker);
+            combos.push(makePresetCombo(category, name || `${category} ${serial}`, input, data));
+            serial++;
+        });
+
+        return { roleName, combos };
+    }
+
+    function importCombosFromText() {
+        const text = document.getElementById('comboImportText').value.trim();
+        const parsed = parseComboImportText(text);
+        if (!parsed || !parsed.roleName || !parsed.combos.length) {
+            alert('没有识别到可导入的连招内容，请检查第一行角色名和后续招式。');
+            return;
+        }
+
+        let team = skillLibrary.teams.find(item => item.name === '拳皇2002');
+        if (!team) {
+            team = { id: makeId('team'), name: '拳皇2002', roles: [] };
+            skillLibrary.teams.push(team);
+        }
+
+        let role = team.roles.find(item => item.name === parsed.roleName);
+        if (!role) {
+            role = { id: makeId('role'), name: parsed.roleName, combos: [] };
+            team.roles.push(role);
+        }
+
+        let added = 0;
+        parsed.combos.forEach(combo => {
+            if (role.combos.some(item => item.name === combo.name)) return;
+            role.combos.push(combo);
+            added++;
+        });
+
+        saveSkillLibrary();
+        renderSkillList();
+        closeComboImport();
+        addLog(added ? `已导入 ${parsed.roleName} 连招 ${added} 条` : `${parsed.roleName} 连招已存在，无需重复导入`);
+        slimeTalk(added ? `${parsed.roleName} 连招已导入！` : '这些连招已经在库里啦。');
+    }
+
+    function normalizeCombo(combo) {
+        return {
+            id: combo.id || makeId('combo'),
+            name: combo.name || '未命名连招',
+            data: (combo.data || []).map(i => ({...i, selected: false}))
+        };
+    }
+
+    function createDefaultSkillLibrary(oldFragments = []) {
+        if (!oldFragments.length) {
+            return { version: 2, teams: [] };
+        }
+
+        return {
+            version: 2,
+            teams: [{
+                id: makeId('team'),
+                name: '未分类队伍',
+                roles: [{
+                    id: makeId('role'),
+                    name: '未分类角色',
+                    combos: oldFragments.map(normalizeCombo)
+                }]
+            }]
+        };
+    }
+
+    function loadSkillLibrary() {
+        try {
+            const saved = JSON.parse(localStorage.getItem('mis_skill_library_v2'));
+            if (saved && Array.isArray(saved.teams)) {
+                saved.teams.forEach(team => {
+                    team.id = team.id || makeId('team');
+                    team.name = team.name || '未命名队伍';
+                    team.roles = Array.isArray(team.roles) ? team.roles : [];
+                    team.roles.forEach(role => {
+                        role.id = role.id || makeId('role');
+                        role.name = role.name || '未命名角色';
+                        role.combos = Array.isArray(role.combos) ? role.combos.map(normalizeCombo) : [];
+                    });
+                });
+                saved.teams = saved.teams.filter(team => {
+                    const isGeneratedEmptyTeam = team.name === '默认队伍' && team.roles.length === 1;
+                    const onlyGeneratedRole = team.roles[0]?.name === '通用角色' && team.roles[0].combos.length === 0;
+                    return !(isGeneratedEmptyTeam && onlyGeneratedRole);
+                });
+                localStorage.setItem('mis_skill_library_v2', JSON.stringify(saved));
+                return saved;
+            }
+        } catch (e) { }
+
+        let oldFragments = [];
+        try {
+            oldFragments = JSON.parse(localStorage.getItem('mis_skill_fragments')) || [];
+        } catch (e) { }
+        return createDefaultSkillLibrary(Array.isArray(oldFragments) ? oldFragments : []);
+    }
+
+    function saveSkillLibrary() {
+        localStorage.setItem('mis_skill_library_v2', JSON.stringify(skillLibrary));
+    }
+
+    function getTeam(teamId = skillView.teamId) {
+        return skillLibrary.teams.find(team => team.id === teamId);
+    }
+
+    function getRole(team = getTeam(), roleId = skillView.roleId) {
+        return team?.roles.find(role => role.id === roleId);
+    }
+
+    function getTeamComboCount(team) {
+        return team.roles.reduce((sum, role) => sum + role.combos.length, 0);
+    }
+
+    function findLastSelectedIndex() {
+        for (let i = rawContentArray.length - 1; i >= 0; i--) {
+            if (rawContentArray[i].selected) return i;
+        }
+        return -1;
+    }
+
+    function skillBack() {
+        if (skillView.roleId) skillView.roleId = null;
+        else if (skillView.teamId) skillView.teamId = null;
+        renderSkillList();
+    }
+
+    function openSkillTeam(teamId) {
+        skillView.teamId = teamId;
+        skillView.roleId = null;
+        renderSkillList();
+    }
+
+    function openSkillRole(roleId) {
+        skillView.roleId = roleId;
+        renderSkillList();
+    }
+
+    function deleteSkillTeam(teamId) {
+        const idx = skillLibrary.teams.findIndex(team => team.id === teamId);
+        if (idx === -1) return;
+
+        const team = skillLibrary.teams[idx];
+        if (confirm(`确定要删除队伍 [${team.name}] 吗？其中角色和连招都会删除。`)) {
+            skillLibrary.teams.splice(idx, 1);
+            if (skillView.teamId === teamId) skillView = { teamId: null, roleId: null };
+            saveSkillLibrary();
+            renderSkillList();
+            addLog(`已删除队伍: ${team.name}`);
+        }
+    }
+
+    function deleteSkillRole(roleId) {
+        const team = getTeam();
+        if (!team) return;
+
+        const idx = team.roles.findIndex(role => role.id === roleId);
+        if (idx === -1) return;
+
+        const role = team.roles[idx];
+        if (confirm(`确定要删除角色 [${role.name}] 吗？其中连招都会删除。`)) {
+            team.roles.splice(idx, 1);
+            if (skillView.roleId === roleId) skillView.roleId = null;
+            saveSkillLibrary();
+            renderSkillList();
+            addLog(`已删除角色: ${role.name}`);
+        }
+    }
+
+    function handleSkillLibraryAdd() {
+        if (!skillView.teamId) {
+            const n = prompt("队伍名:", "新队伍");
+            if (n) {
+                skillLibrary.teams.push({ id: makeId('team'), name: n, roles: [] });
+                saveSkillLibrary();
+                renderSkillList();
+                slimeTalk("新队伍已建立！");
+            }
+            return;
+        }
+
+        const team = getTeam();
+        if (!team) return;
+
+        if (!skillView.roleId) {
+            const n = prompt("角色名:", "新角色");
+            if (n) {
+                team.roles.push({ id: makeId('role'), name: n, combos: [] });
+                saveSkillLibrary();
+                renderSkillList();
+                slimeTalk("新角色已加入队伍！");
+            }
+            return;
+        }
+
+        const role = getRole(team);
+        if (!role) return;
+
+        const sel = rawContentArray.filter(i => i.selected && i.type === 'data');
+        if (sel.length > 0) {
+            const n = prompt("连招片段名:", "新片段");
+            if (n) {
+                role.combos.push({
+                    id: makeId('combo'),
+                    name: n,
+                    data: sel.map(i => ({...i, selected: false}))
+                });
+                saveSkillLibrary();
+                renderSkillList();
+                slimeTalk("新连招已收录！(๑•̀ㅂ•́)و✧");
+            }
+        } else {
+            alert("请先在主编辑区勾选需要保存的行");
+        }
+    }
+
+    function applyCombo(combo) {
+        let target = findLastSelectedIndex();
+        if (target === -1) target = rawContentArray.length - 1;
+        rawContentArray.splice(target + 1, 0, ...combo.data.map(i => ({...i, selected: false})));
+        renderTimeline();
+        addLog(`应用连招: ${combo.name}`);
+        slimeTalk("连招一键载入！");
+    }
+
+    function findComboById(comboId) {
+        for (const team of skillLibrary.teams) {
+            for (const role of team.roles) {
+                const combo = role.combos.find(item => item.id === comboId);
+                if (combo) return combo;
+            }
+        }
+        return null;
+    }
+
+    function selectReplacementCombo(event, comboId) {
+        event.stopPropagation();
+        replacementComboId = event.target.checked ? comboId : null;
+        renderSkillList();
+    }
+
+    function replaceSelectedWithCombo() {
+        const combo = findComboById(replacementComboId);
+        if (!combo) {
+            alert("请先在左侧连招库勾选一个要被更新的连招。");
+            return;
+        }
+
+        const selectedRows = rawContentArray
+            .filter(item => item.type === 'data' && item.selected)
+            .map(item => ({...item, selected: false}));
+
+        if (!selectedRows.length) {
+            alert("请先在主编辑区勾选要保存到连招库的指令行。");
+            return;
+        }
+
+        combo.data = selectedRows;
+        saveSkillLibrary();
+        renderSkillList();
+        addLog(`已更新连招: ${combo.name}（${selectedRows.length} 行）`);
+        slimeTalk("连招库条目已更新！");
+    }
+
+    function renderSkillList() {
+        const l = document.getElementById('skillList');
+        const title = document.getElementById('skillPanelTitle');
+        const breadcrumb = document.getElementById('skillBreadcrumb');
+        const backBtn = document.getElementById('skillBackBtn');
+        const addBtn = document.getElementById('skillAddBtn');
+        const hint = document.getElementById('skillHint');
+        l.innerHTML = '';
+
+        const team = getTeam();
+        const role = getRole(team);
+        backBtn.style.display = skillView.teamId ? 'inline-flex' : 'none';
+
+        if (!skillView.teamId) {
+            title.innerText = '所有队伍';
+            breadcrumb.innerText = '所有队伍';
+            addBtn.title = '新增队伍';
+            hint.innerText = '点击 + 新增队伍；点击队伍进入角色列表；点 × 删除队伍';
+
+            if (!skillLibrary.teams.length) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.innerText = '还没有队伍，点击右上角 + 新增一个队伍。';
+                l.appendChild(empty);
+            }
+
+            skillLibrary.teams.forEach(team => {
+                const d = document.createElement('div');
+                d.className = 'skill-item team has-action';
+                d.innerHTML = `
+                    <strong class="skill-name">${escapeHTML(team.name)}</strong>
+                    <div class="skill-meta"><span>${team.roles.length} 个角色</span><span>${getTeamComboCount(team)} 个连招</span></div>
+                    <button class="btn skill-delete" onclick="event.stopPropagation(); deleteSkillTeam('${team.id}')" title="删除队伍">×</button>
+                `;
+                d.onclick = () => openSkillTeam(team.id);
+                d.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    deleteSkillTeam(team.id);
+                };
+                l.appendChild(d);
+            });
+            return;
+        }
+
+        if (skillView.teamId && !skillView.roleId) {
+            if (!team) {
+                skillView.teamId = null;
+                renderSkillList();
+                return;
+            }
+
+            title.innerText = team.name;
+            breadcrumb.innerText = `所有队伍 / ${team.name}`;
+            addBtn.title = '新增角色';
+            hint.innerText = '点击 + 新增角色；点击角色进入连招库；点 × 删除角色';
+
+            if (!team.roles.length) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.innerText = '这个队伍还没有角色，点击右上角 + 新增角色。';
+                l.appendChild(empty);
+            }
+
+            team.roles.forEach(role => {
+                const d = document.createElement('div');
+                d.className = 'skill-item role has-action';
+                d.innerHTML = `
+                    <strong class="skill-name">${escapeHTML(role.name)}</strong>
+                    <div class="skill-meta"><span>角色连招库</span><span>${role.combos.length} 个连招</span></div>
+                    <button class="btn skill-delete" onclick="event.stopPropagation(); deleteSkillRole('${role.id}')" title="删除角色">×</button>
+                `;
+                d.onclick = () => openSkillRole(role.id);
+                d.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    deleteSkillRole(role.id);
+                };
+                l.appendChild(d);
+            });
+            return;
+        }
+
+        if (!team || !role) {
+            skillView.roleId = null;
+            renderSkillList();
+            return;
+        }
+
+        title.innerText = `${role.name}的连招库`;
+        breadcrumb.innerText = `所有队伍 / ${team.name} / ${role.name}`;
+        addBtn.title = '保存选中的连招片段';
+        hint.innerText = '点击连招即可插入；勾选方框可作为替换源；右键点击连招可删除';
+
+        if (!role.combos.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.innerText = '勾选动作行后点击 +，即可保存为该角色的连招。';
+            l.appendChild(empty);
+        }
+
+        role.combos.forEach((combo, idx) => {
+            const d = document.createElement('div');
+            const isReplacement = replacementComboId === combo.id;
+            d.className = `skill-item combo has-replace-select ${isReplacement ? 'replace-source' : ''}`;
+            d.innerHTML = `
+                <strong class="skill-name">${escapeHTML(combo.name)}</strong>
+                <div class="skill-meta"><span>${combo.data.length} 行动作</span><span>点击应用</span></div>
+                <label class="combo-replace-select" onclick="event.stopPropagation()" title="选为替换源">
+                    <input type="checkbox" ${isReplacement ? 'checked' : ''} onchange="selectReplacementCombo(event, '${combo.id}')">
+                </label>
+            `;
+            d.onclick = () => applyCombo(combo);
+            d.oncontextmenu = (e) => {
+                e.preventDefault();
+                if (confirm(`确定要从库中删除连招 [${combo.name}] 吗？`)) {
+                    if (replacementComboId === combo.id) replacementComboId = null;
+                    role.combos.splice(idx, 1);
+                    saveSkillLibrary();
+                    renderSkillList();
+                    addLog(`已删除连招: ${combo.name}`);
+                }
+            };
+            l.appendChild(d);
+        });
+        saveSkillLibrary();
+    }
+
+    initBackground();
+    renderSkillList();
+    renderTimeline();
+</script>
+</body>
+</html>
